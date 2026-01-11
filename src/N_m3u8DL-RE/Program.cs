@@ -364,10 +364,6 @@ internal class Program
             return;
         }
 
-#if DEBUG
-        Console.WriteLine("Press any key to continue...");
-        Console.ReadKey();
-#endif
 
         Logger.InfoMarkUp(ResString.saveName + $"[deepskyblue1]{option.SaveName.EscapeMarkup()}[/]");
 

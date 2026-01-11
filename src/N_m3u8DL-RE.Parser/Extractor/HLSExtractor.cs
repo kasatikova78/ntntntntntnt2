@@ -20,6 +20,22 @@ internal class HLSExtractor : IExtractor
 
     public ParserConfig ParserConfig { get; set; }
 
+    //Chrome Ctrl+Shift+F 搜索关键字 playlistDecryptHandler 和 MOUFLON，在可疑的地方console.log()或者下断点(Source Overrides 替换js文件内容)
+    //平台有多个播放器，如果这个房间没有触发逻辑就多试几个房间，断到了playlistDecryptHandler后就查看变量，key就在里面
+    //chunk-fb8457ec7ca0302d78a3.js 搜索 this._playlistDecryptHandler = n，下断点，断到之后看右边的this._playlistDecryptHandler._knownKeyIds和this._playlistDecryptHandler._knownKeys
+    //如果知道密钥的前缀，可以捕捉Heap Snapshot，然后保存Snapshot，用EmEditor配合正则表达式 "EQue.{12}" 去搜索
+
+    //知道密钥以后，去找到使用密钥对应的代码：
+    //Memory面板搜索密钥，点击密钥对象，查看Retainer，寻找可疑的方法，比如_decode()，展开以后看到prototype in Kn()，说明代码在Kn类里
+    //Memory面板 Filter By Class 搜索Kn，展开__proto__，constructor，shared，script获取脚本名 https://img.doppiocdn.com/player/mmp/v2.1.3/chunk-fb8457ec7ca0302d78a3.js
+    //Network面板搜索fb8457ec7ca0302d78a3，跳转到对应的代码文件，搜索class Kn
+    Dictionary<string, string> ih = new Dictionary<string, string>
+    {
+        { "Zokee2OhPh9kugh4", "Quean4cai9boJa5a" },
+        { "Zeechoej4aleeshi", "ubahjae7goPoodi6" },
+        { "Ook7quaiNgiyuhai", "EQueeGh2kaewa3ch" }
+    };
+
     public HLSExtractor(ParserConfig parserConfig)
     {
         this.ParserConfig = parserConfig;
@@ -201,6 +217,33 @@ internal class HLSExtractor : IExtractor
 
         return Task.FromResult(streams);
     }
+    private Byte[] SHA256EncryptByte(string deseninstr)
+    {
+        using (var mySHA256 = System.Security.Cryptography.SHA256Managed.Create())
+        {
+            byte[] deseninbyte = System.Text.Encoding.UTF8.GetBytes(deseninstr);
+            byte[] EncryptBytes = mySHA256.ComputeHash(deseninbyte);
+            return EncryptBytes;
+        }
+    }
+    private Byte[] Base64Decode(string data)
+    {
+        int missing_padding = data.Length % 4;
+        int need_to_add_count = 4 - missing_padding;
+        if (missing_padding != 0)
+        {
+            for (int i = 0; i < need_to_add_count; i++)
+                data = data + '=';
+        }
+        return Convert.FromBase64String(data);
+    }
+
+    public static string Reverse(string text)
+    {
+        char[] array = text.ToCharArray();
+        Array.Reverse(array);
+        return new String(array);
+    }
 
     private Task<Playlist> ParseListAsync()
     {
@@ -239,6 +282,8 @@ internal class HLSExtractor : IExtractor
         MediaSegment segment = new();
         List<MediaSegment> segments = [];
 
+        string pkey = "";
+        Dictionary<string, int> part_url_dictionary = new Dictionary<string, int>();
 
         while ((line = sr.ReadLine()) != null)
         {
@@ -321,6 +366,7 @@ internal class HLSExtractor : IExtractor
                 }
                 lastKeyLine = line;
             }
+            /*
             // 解析分片时长
             else if (line.StartsWith(HLSTags.extinf))
             {
@@ -337,6 +383,7 @@ internal class HLSExtractor : IExtractor
                 expectSegment = true;
                 segIndex++;
             }
+            */
             // m3u8主体结束
             else if (line.StartsWith(HLSTags.ext_x_endlist))
             {
@@ -391,6 +438,71 @@ internal class HLSExtractor : IExtractor
                     }
                 }
             }
+            else if (line.StartsWith("#EXT-X-PART-INF")) continue;
+            else if (line.StartsWith("#EXT-X-MOUFLON:PSCH"))
+            {
+                string[] splits = line.Split(':');
+                pkey = splits[splits.Length - 1];
+            }
+            else if (line.StartsWith("#EXT-X-MOUFLON:URI"))
+            {
+                string part_url = line.Substring(19);
+                if (!part_url.Contains("_part"))
+                    continue;
+                string[] splits_outer = part_url.Split('_');
+                string encrypted_content = splits_outer[2];
+                string encrypted_content_reversed = Reverse(encrypted_content);
+
+                string t = ih[pkey];
+                byte[] i = SHA256EncryptByte(t);
+                byte[] n = Base64Decode(encrypted_content_reversed);
+
+                byte[] s = new byte[n.Length];
+                for (int x = 0; x < n.Length; x++)
+                    s[x] = (byte)((int)n[x] ^ (int)i[x % i.Length]);
+                string decode_content = System.Text.Encoding.UTF8.GetString(s);
+                part_url = part_url.Replace(encrypted_content, decode_content);
+                if (!part_url_dictionary.ContainsKey(part_url))
+                {
+                    string[] splits = part_url.Split('_');
+
+                    string timestampCorrupted = splits[splits.Length - 2];
+                    string[] splits2 = timestampCorrupted.Split('.');
+                    string timestamp = splits2[0];
+                    long timestampNumber = long.Parse(timestamp);
+
+                    string partCorrupted = splits[splits.Length - 1];
+                    string[] splits3 = partCorrupted.Split('.');
+                    string part = splits3[0];
+                    int partNumber = int.Parse(part.Replace("part", ""));
+
+                    string streamIndex = splits[splits.Length - 4];
+                    int streamIndexNumber = int.Parse(streamIndex);
+                    /*
+                    this.last_msn = streamIndexNumber;
+                    this.last_part = partNumber;
+                    if (!msn_max_part_dict.ContainsKey(streamIndexNumber))
+                        msn_max_part_dict[streamIndexNumber] = 0;
+
+                    if (partNumber > msn_max_part_dict[streamIndexNumber])
+                        msn_max_part_dict[streamIndexNumber] = partNumber;
+                    */
+                    long timestampNumberAddPart = timestampNumber * 100 + partNumber;
+                    DateTime partDateTime = new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc);
+                    partDateTime = partDateTime.AddSeconds(timestampNumberAddPart).ToLocalTime();
+
+                    segment.Url = part_url;
+                    segment.DateTime = partDateTime;
+                    segment.Duration = Convert.ToDouble(2);
+                    segment.Index = timestampNumberAddPart;
+                    segments.Add(segment);
+                    segment = new();
+
+                    part_url_dictionary[part_url] = 0;
+                    //Console.WriteLine(string.Format("HLSExtract parse part url:{0} timestampNumber:{1} partNumber:{2} Index:{3} partNumber:{4}", part_url, timestampNumber, partNumber, segment.Index, partNumber));
+                }
+            }
+            /*
             // 评论行不解析
             else if (line.StartsWith('#')) continue;
             // 空白行不解析
@@ -399,6 +511,7 @@ internal class HLSExtractor : IExtractor
             else if (expectSegment)
             {
                 var segUrl = PreProcessUrl(ParserUtil.CombineURL(BaseUrl, line));
+                Console.WriteLine(string.Format("expectSegment segUrl:{0}", segUrl));
                 segment.Url = segUrl;
                 segments.Add(segment);
                 segment = new();
@@ -420,6 +533,7 @@ internal class HLSExtractor : IExtractor
                 }
                 expectSegment = false;
             }
+            */
         }
 
         // 直播的情况，无法遇到m3u8结束标记，需要手动将segments加入parts
