@@ -84,29 +84,8 @@ internal class SimpleLiveRecordManager2
     /// <returns></returns>
     private string GetSegmentName(MediaSegment segment, bool allHasDatetime, bool allSamePath)
     {
-        if (!string.IsNullOrEmpty(segment.NameFromVar))
-        {
-            return segment.NameFromVar;
-        }
-
-        bool hls = StreamExtractor.ExtractorType == ExtractorType.HLS;
-
-        string name = OtherUtil.GetFileNameFromInput(segment.Url, false);
-        if (allSamePath)
-        {
-            name = OtherUtil.GetValidFileName(segment.Url.Split('?').Last(), "_");
-        }
-
-        if (hls && allHasDatetime)
-        {
-            name = GetUnixTimestamp(segment.DateTime!.Value).ToString();
-        }
-        else if (hls)
-        {
-            name = segment.Index.ToString();
-        }
-
-        return name;
+        string filename = OtherUtil.GetFileNameFromInput(segment.Url, false);
+        return filename;
     }
 
     private void ChangeSpecInfo(StreamSpec streamSpec, List<Mediainfo> mediainfos, ref bool useAACFilter)
